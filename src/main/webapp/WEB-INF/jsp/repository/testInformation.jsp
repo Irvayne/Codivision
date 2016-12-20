@@ -35,8 +35,9 @@
 							
 				</div>
 				<hr>
-				<div class="col-md-12 text-center">
-							<div id="corpo"></div>
+				<div id=corpo  class="col-md-12 text-center">
+							
+							
 							
 				</div>
 				
@@ -46,6 +47,7 @@
 	</div>
 </div>
 	<input type="hidden" id="repository" value="${repository.id}" />
+	<input type="hidden" id="repositoryName" value="${repository.name}" />
 	<input type="hidden" id="extractionPath" value="${extractionPath.id}" />
 	
 	<script src="https://code.highcharts.com/highcharts.js"></script>
@@ -68,10 +70,78 @@
 
 					Highcharts.setOptions({lang: {noData: "Não houveram alterações neste diretório/arquivo no período especificado"}});
 					
-					
+					var repositoryName = $('#repositoryName').val();
 					var repository = $('#repository').val();
 					var path = $('#extractionPath').val();
 					
+					
+					$.ajax({
+						type : 'POST',
+						url : '/codivision/repository/' + repository + '/authors',
+						success : function(dataAuthor) {
+							
+							for(i = 0; i< dataAuthor.length; i++){
+								var nome = dataAuthor[i];
+								//onde o elemento será adicionado
+						        pai = document.getElementById("corpo");
+						        //definimos qual elemento queremos criar
+						        elem = document.createElement("div");
+						        //Definimos o texto do elemento.
+						       	elem.setAttribute( "id","chartAuthor"+nome );
+						        //adicionamos o elemento com o texto na div corpo
+						        pai.appendChild(elem);
+							}
+							for(i = 0; i< dataAuthor.length; i++){
+								
+								var nome = dataAuthor[i];
+								chartsPlot(nome);
+								
+							}
+						}
+					});
+					
+					function chartsPlot(nome){
+						
+						$.ajax({
+							type : 'POST',
+							url : '/codivision/repository/' + repository + '/historyAuthor',
+							data : {'author' : nome},
+							success : function(datas) {
+								
+								Highcharts.chart('chartAuthor'+nome, {
+					        title: {
+					            text: 'Histórico de Commits do Desenvolvedor '+nome,
+					            x: -20 //center
+					        },
+					        subtitle: {
+					            text: 'Relação entre os commits comuns e commits de teste',
+					            x: -20
+					        },
+					        xAxis: {
+					            categories: datas.dataCategories
+					        },
+					        yAxis: {
+					            title: {
+					                text: 'Quantidade de Linhas Alteradas'
+					            },
+					            plotLines: [{
+					                value: 0,
+					                width: 1,
+					                color: '#808080'
+					            }]
+					        },
+					        tooltip: {
+					            valueSuffix: ''
+					        },
+					        legend: {
+					       
+					        },
+					        series: datas.dataSeries
+					    });
+						
+							}
+						});
+						}
 
 					$.ajax({
 						type : 'POST',
@@ -218,7 +288,7 @@
 					
 					Highcharts.chart('chart', {
 				        title: {
-				            text: 'Histórico de Commits do Projeto MGCC',
+				            text: 'Histórico de Commits do Projeto '+repositoryName,
 				            x: -20 //center
 				        },
 				        subtitle: {
@@ -250,72 +320,6 @@
 						}
 					});
 					
-					$.ajax({
-						type : 'POST',
-						url : '/codivision/repository/' + repository + '/authors',
-						success : function(dataAuthor) {
-							
-							for(i = 0; i< dataAuthor.length; i++){
-								var nome = dataAuthor[i];
-								//onde o elemento será adicionado
-						        pai = document.getElementById("corpo");
-						        //definimos qual elemento queremos criar
-						        elem = document.createElement("div");
-						        //Definimos o texto do elemento.
-						       	elem.setAttribute( "id","chartAuthor"+nome );
-						        //adicionamos o elemento com o texto na div corpo
-						        pai.appendChild(elem);
-							}
-							for(i = 0; i< dataAuthor.length; i++){
-								var nome = dataAuthor[i];
-								$.ajax({
-									type : 'POST',
-									url : '/codivision/repository/' + repository + '/historyAuthor',
-									data : {'author' : nome},
-									success : function(datas) {
-										
-										Highcharts.chart('chartAuthor'+nome, {
-							        title: {
-							            text: 'Histórico de Commits do Desenvolvedor '+nome,
-							            x: -20 //center
-							        },
-							        subtitle: {
-							            text: 'Relação entre os commits comuns e commits de teste',
-							            x: -20
-							        },
-							        xAxis: {
-							            categories: datas.dataCategories
-							        },
-							        yAxis: {
-							            title: {
-							                text: 'Quantidade de Linhas Alteradas'
-							            },
-							            plotLines: [{
-							                value: 0,
-							                width: 1,
-							                color: '#808080'
-							            }]
-							        },
-							        tooltip: {
-							            valueSuffix: ''
-							        },
-							        legend: {
-							       
-							        },
-							        series: datas.dataSeries
-							    });
-								
-									}
-								});
-							}
-						}
-					});
-					
-					
-					
-					
-					
-										
 					
 					
 
