@@ -1,0 +1,506 @@
+/**
+ * 
+ */
+package br.ufpi.ppgcc.mi.core.dao;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import javax.persistence.NoResultException;
+
+import com.mysql.fabric.xmlrpc.base.Array;
+
+import br.ufpi.ppgcc.mi.common.dao.GenericDAO;
+import br.ufpi.ppgcc.mi.core.model.Configuration;
+import br.ufpi.ppgcc.mi.core.model.Repository;
+import br.ufpi.ppgcc.mi.core.model.vo.AuthorPercentage;
+import br.ufpi.ppgcc.mi.core.model.vo.CommitHistory;
+import br.ufpi.ppgcc.mi.core.model.vo.LineChart;
+import br.ufpi.ppgcc.mi.core.model.vo.RepositoryVO;
+
+/**
+ * @author Werney Ayala
+ *
+ */
+public class RepositoryDAO extends GenericDAO<Repository>{
+
+	/**
+	 * @param entityClass
+	 */
+	public RepositoryDAO() {
+		super(Repository.class);
+	}
+	
+	/**
+	 * This method gets a repository from your URL
+	 * @param url - The url of the repository
+	 * @return Repository or null if it does not find
+	 */
+	public Repository findByUrl(String url) {
+		try {
+			return em.createQuery("select repository from Repository as repository "
+					+ "where repository.url = :url", Repository.class)
+					.setParameter("url", url)
+					.getSingleResult();
+		} catch (NoResultException e){
+			return null;
+		}
+	}
+	
+	/**
+	 * This method gets the list of repositories from a User
+	 * @param userLogin - The login of the target user
+	 * @return List<RepositoryVO> - The list of repositories from a User 
+	 */
+	public List<RepositoryVO> listMyRepositories(Long userId) {
+		return em.createQuery("select new br.ufpi.ppgcc.mi.core.model.vo.RepositoryVO(repository) "
+				+ "from Repository as repository, IN(repository.userRepositories) as ur "
+				+ "where ur.user.id = :userId and repository.deleted = false order by repository.name asc", RepositoryVO.class)
+				.setParameter("userId", userId)
+				.getResultList();
+	}
+	
+	public Configuration getConfiguration(Long repositoryId) {
+		return em.createQuery("select configuration from Repository as repository inner join "
+				+ "repository.configuration as configuration where repository.id = :repositoryId", Configuration.class)
+				.setParameter("repositoryId", repositoryId)
+				.getSingleResult();
+	}
+	
+	public List<AuthorPercentage> getDoa(Long repositoryId, String path) {
+		
+		String otherAlterations = "(SELECT count(*) from "
+				+ "Repository as repo1, "
+				+ "IN(repo1.revisions) as rev1, "
+				+ "IN(rev1.files) as file1 "
+			+ "WHERE "
+				+ "file1.path = file.path and "
+				+ "repo1.id = :repositoryId and "
+				+ "rev1.author != revision.author)";
+		
+		String myAlterations = "(SELECT count(*) from "
+				+ "Repository as repo2, "
+				+ "IN(repo2.revisions) as rev2, "
+				+ "IN(rev2.files) as file2 "
+			+ "WHERE "
+				+ "file2.path = file.path and "
+				+ "repo2.id = :repositoryId and "
+				+ "rev2.author = revision.author)";
+		
+		String firstAuthor = "(SELECT count(*) from "
+				+ "Repository as repo3, "
+				+ "IN(repo3.revisions) as rev3, "
+				+ "IN(rev3.files) as file3 "
+			+ "WHERE "
+				+ "file3.path = file.path and "
+				+ "repo3.id = :repositoryId and "
+				+ "rev3.author = revision.author and "
+				+ "file3.operationType = 'ADD' )"; 
+		
+		List<AuthorPercentage> at =  em.createQuery("select new br.ufpi.ppgcc.mi.core.model.vo.AuthorPercentage( revision.author, sum(3.293 + (1.98 * " + firstAuthor + ") + (0.164 * " + myAlterations + ") - (0.321 * log( 1 + " + otherAlterations + "))), 0l) from Repository as repository, "
+				+ "IN(repository.revisions) as revision, IN(revision.files) as file where repository.id = :repositoryId and file.path like :path group by revision.author", AuthorPercentage.class)
+				.setParameter("repositoryId", repositoryId)
+				.setParameter("path", path + "%")
+				.getResultList();
+		return at;
+	}
+	
+	/**
+	 * This method obtains the percentage of changes in a directory or file held by each developer
+	 * @param repositoryId - The id of target repository
+	 * @param path - The path of the directory of file
+	 * @return List<AuthorPercentage> - The list with the percentage of alterations made by each developer
+	 * 									 in the specified directory or file
+	 */
+	public List<AuthorPercentage> getPercentage(Long repositoryId, String path){
+		
+		/* Obtem a quantidade de alterações realizadas por outros desenvolvedores no arquivo 
+		 * Essas alterações são calculadas em nível de arquivo pois foi a única forma que encotrei de fazer
+		 * Essa é uma subconsulta baseada na consulta principal, então ela depende da data da consulta principal,
+		 * 		pois só são contabilizadas alterações posteriores a data informada */
+		String futureAlterations = "SELECT case when count(*) < 20 then count(*) else 20 end from "
+										+ "Repository as r, "
+										+ "IN(r.revisions) as rev, "
+										+ "IN(rev.files) as f "
+									+ "WHERE "
+										+ "f.path = file.path and "
+										+ "r.id = :repositoryId and "
+										+ "rev.author != revision.author and "
+										+ "rev.date > revision.date";
+		
+		/* Cria um objeto do tipo AuthorPercentage
+		 * Recebe como parâmetros um desenvolvedor e a quantidade de alterações realizadas por ele
+		 * A quantidade de alterações é calculada da seguinte forma:
+		 * 		- São somados os valores de ADD MOD e DEL para arquivo dentro do caminho selecionado
+		 * 				- Esses valores são multiplicados pelos seus respectivos pesos
+		 * 		- O valor resultante é penalizado de acordo com a data em que foi feita essa alteração 
+		 * 				- 10% por mês decorrido 
+		 * 		- O valor resultante é penalizado de acordo com a quantidade de alterações realizadas 
+		 * 				por outros desenvolvedores (5% por cada alteração realizada por outro desenvolvedor). 
+		 * 		- Todo esse calculo é feito para cada arquivo e depois agregado por todos os arquivos 
+		 * 				por meio da função SUM e agrupado por cada desenvolvedor */
+		String newAuthorPercentace = "new br.ufpi.ppgcc.mi.core.model.vo.AuthorPercentage("
+										+ "revision.author, "
+								   		+ "sum( "
+								   			+ "((file.lineAdd * configuration.addWeight) + (file.lineMod * configuration.modWeight) + (file.lineDel * configuration.delWeight)) * "
+								   			+ "(1.0 - ( datediff(current_date(),cast(revision.date as date)) * configuration.monthlyDegradationPercentage)) * "
+								   			+ "(1.0 - ((" + futureAlterations + ") * (configuration.changeDegradation/100) )) "
+					   					+ "), "
+					   					+ "sum(file.lineAdd + file.lineMod + file.lineDel + 0)"
+				   					+ ")";
+		
+		/* A query principal */
+		String query = "SELECT " + newAuthorPercentace + " from "
+							+ "Repository as repository "
+							+ "inner join repository.configuration as configuration, "
+							+ "IN(repository.revisions) as revision, "
+							+ "IN(revision.files) as file "
+					+ "WHERE "
+						+ "file.path LIKE :path and "
+						+ "repository.id = :repositoryId and "
+						+ "revision.date >= configuration.initDate and "
+						+ "revision.date <= configuration.endDate "
+					+ "GROUP BY "
+						+ "revision.author "
+					+ "ORDER BY "
+						+ "revision.author ASC";
+		
+		return em.createQuery(query, AuthorPercentage.class)
+				.setParameter("repositoryId", repositoryId)
+				.setParameter("path", path+"%")
+				.getResultList();
+		
+	}
+	
+public List<AuthorPercentage> getPercentageTest(Long repositoryId, String path){
+		
+		/* Obtem a quantidade de alterações realizadas por outros desenvolvedores no arquivo 
+		 * Essas alterações são calculadas em nível de arquivo pois foi a única forma que encotrei de fazer
+		 * Essa é uma subconsulta baseada na consulta principal, então ela depende da data da consulta principal,
+		 * 		pois só são contabilizadas alterações posteriores a data informada */
+		String futureAlterations = "SELECT case when count(*) < 20 then count(*) else 20 end from "
+										+ "Repository as r, "
+										+ "IN(r.revisions) as rev, "
+										+ "IN(rev.files) as f "
+									+ "WHERE "
+										+ "f.path = file.path and "
+										+ "r.id = :repositoryId and "
+										+ "rev.author != revision.author and "
+										+ "rev.date > revision.date";
+		
+		/* Cria um objeto do tipo AuthorPercentage
+		 * Recebe como parâmetros um desenvolvedor e a quantidade de alterações realizadas por ele
+		 * A quantidade de alterações é calculada da seguinte forma:
+		 * 		- São somados os valores de ADD MOD e DEL para arquivo dentro do caminho selecionado
+		 * 				- Esses valores são multiplicados pelos seus respectivos pesos
+		 * 		- O valor resultante é penalizado de acordo com a data em que foi feita essa alteração 
+		 * 				- 10% por mês decorrido 
+		 * 		- O valor resultante é penalizado de acordo com a quantidade de alterações realizadas 
+		 * 				por outros desenvolvedores (5% por cada alteração realizada por outro desenvolvedor). 
+		 * 		- Todo esse calculo é feito para cada arquivo e depois agregado por todos os arquivos 
+		 * 				por meio da função SUM e agrupado por cada desenvolvedor */
+		String newAuthorPercentace = "new br.ufpi.ppgcc.mi.core.model.vo.AuthorPercentage("
+										+ "revision.author, "
+								   		+ "sum( "
+								   			+ "((file.lineAdd * configuration.addWeight) + (file.lineMod * configuration.modWeight) + (file.lineDel * configuration.delWeight)) * "
+								   			+ "(1.0 - ( datediff(current_date(),cast(revision.date as date)) * configuration.monthlyDegradationPercentage)) * "
+								   			+ "(1.0 - ((" + futureAlterations + ") * (configuration.changeDegradation/100) )) "
+					   					+ "), "
+					   					+ "sum(file.lineAdd + file.lineMod + file.lineDel + 0)"
+				   					+ ")";
+		
+		/* A query principal */
+		String query = "SELECT " + newAuthorPercentace + " from "
+							+ "Repository as repository "
+							+ "inner join repository.configuration as configuration, "
+							+ "IN(repository.revisions) as revision, "
+							+ "IN(revision.files) as file "
+					+ "WHERE "
+						+ "file.path LIKE :path and (file.path LIKE '%Test%' OR file.path LIKE '%test%') and "
+						+ "repository.id = :repositoryId and "
+						+ "revision.date >= configuration.initDate and "
+						+ "revision.date <= configuration.endDate "
+					+ "GROUP BY "
+						+ "revision.author "
+					+ "ORDER BY "
+						+ "revision.author ASC";
+		
+		return em.createQuery(query, AuthorPercentage.class)
+				.setParameter("repositoryId", repositoryId)
+				.setParameter("path", path+"%")
+				.getResultList();
+		
+	}
+	
+	public LineChart getTestCommitsHistory(long repositoryId){
+		
+		//todos os commits
+		String query = "SELECT DAY(revision.date) as day, MONTHNAME(revision.date) as month "
+				+ "FROM Repository AS repository, "
+				+ "IN (repository.revisions) as revision "
+				+ "WHERE repository.id = "+repositoryId+" "
+				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
+				+ "ORDER BY revision.id";
+		//commits sem ser de testes
+		String query1 = "SELECT DAY(revision.date) as dia, MONTHNAME(revision.date) as mes, "
+				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
+				+ "FROM Repository AS repository, "
+				+ "IN(repository.revisions) as revision, "
+				+ "IN(revision.files) as file "
+				+ "WHERE repository.id = "+repositoryId+" "
+						+ "AND NOT(file.path LIKE '%test%' OR file.path LIKE '%Test%') "
+				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
+				+ "ORDER BY revision.id";
+		//commits de testes
+		String query2 = "SELECT DAY(revision.date) as dia, MONTHNAME(revision.date) as mes, "
+				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
+				+ "FROM Repository AS repository, "
+				+ "IN(repository.revisions) as revision, "
+				+ "IN(revision.files) as file "
+				+ "WHERE repository.id = "+repositoryId+" "
+						+ "AND (file.path LIKE '%test%' OR file.path LIKE '%Test%') "
+				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
+				+ "ORDER BY revision.id";
+		
+		LineChart chart = new LineChart();
+		
+		
+		List<Object[]> list = em.createQuery(query).getResultList();
+		String[] categories = new String[list.size()];
+		
+		for(int i = 0; i < list.size(); i++){
+			categories[i] =   list.get(i)[0] + " - " +  list.get(i)[1];
+			
+		}
+		List<Object[]> list1 = em.createQuery(query1).getResultList();
+		CommitHistory history = new CommitHistory();
+		history.setName("Commits Comuns");
+		
+		long[] vetor = new long[list.size()];
+		fodefora: for(int i = 0; i < list.size(); i++){
+			for(int j = 0;j < list1.size(); j++){
+				vetor[i] = 0l;
+			if(categories[i].equals(list1.get(j)[0] + " - " +  list1.get(j)[1])){
+				vetor[i] = (long) list1.get(j)[2];
+				continue fodefora;
+			}
+			}
+		}
+		
+		history.setData(vetor);
+		
+		List<Object[]> list2 = em.createQuery(query2).getResultList();
+		CommitHistory history2 = new CommitHistory();
+		history2.setName("Commits de Teste");
+		
+		long[] vetor2 = new long[list.size()];
+		
+		fora: for(int i = 0; i < list.size(); i++){
+			for(int j = 0;j < list2.size(); j++){
+				vetor2[i] = 0l;
+				if(categories[i].equals(list2.get(j)[0] + " - " +  list2.get(j)[1])){
+					vetor2[i] = (long) list2.get(j)[2];
+					continue fora;
+				}
+			}
+		}
+		
+		history2.setData(vetor2);
+		
+		List<CommitHistory> commits = new ArrayList<CommitHistory>();
+		commits.add(history);
+		commits.add(history2);
+		chart.setDataSeries(commits);
+		chart.setDataCategories(categories);
+		
+		
+		
+		return chart;
+		
+		
+	}
+	
+	public List<CommitHistory> getContribuitionAuthorTest(long repositoryId){
+		
+				String query = "SELECT revision.author as author, "
+						+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
+						+ "FROM Repository AS repository, "
+						+ "IN(repository.revisions) as revision, "
+						+ "IN(revision.files) as file "
+						+ "WHERE repository.id = "+repositoryId+" "
+								+ "AND (file.path LIKE '%test%' OR file.path LIKE '%Test%') "
+						+ "GROUP BY revision.author "
+						+ "ORDER BY revision.author";
+				
+				List<Object[]> list = em.createQuery(query).getResultList();
+				
+				ArrayList<CommitHistory> lista = new ArrayList<>();
+				for(int i = 0; i<list.size(); i++){
+					CommitHistory history = new CommitHistory();
+					history.setName((String) list.get(i)[0]);
+					long[] vetor = new long[1];
+					history.setName((String) list.get(i)[0]);
+					vetor[0] = (long) list.get(i)[1];
+					history.setData(vetor);
+					lista.add(history);
+				}
+				
+				return lista;
+				
+	}
+	
+	public List<CommitHistory> getContribuitionQntLine(long repositoryId, String path){
+		String query = "SELECT revision.author as author, "
+				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
+				+ "FROM Repository AS repository, "
+				+ "IN(repository.revisions) as revision, "
+				+ "IN(revision.files) as file "
+				+ "WHERE repository.id = "+repositoryId+" AND file.path LIKE '"+path+"%' "
+						+ "AND NOT(file.path LIKE '%test%' OR file.path LIKE '%Test%') "
+				+ "GROUP BY revision.author "
+				+ "ORDER BY revision.author";
+		
+		List<Object[]> list = em.createQuery(query).getResultList();
+		
+		ArrayList<CommitHistory> lista = new ArrayList<>();
+		for(int i = 0; i<list.size(); i++){
+			CommitHistory history = new CommitHistory();
+			history.setName((String) list.get(i)[0]);
+			long[] vetor = new long[1];
+			history.setName((String) list.get(i)[0]);
+			vetor[0] = (long) list.get(i)[1];
+			history.setData(vetor);
+			lista.add(history);
+		}
+		
+		return lista;
+		
+		
+	}
+	
+	public List<CommitHistory> getContribuitionQntLineTest(long repositoryId, String path){
+		String query = "SELECT revision.author as author, "
+				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
+				+ "FROM Repository AS repository, "
+				+ "IN(repository.revisions) as revision, "
+				+ "IN(revision.files) as file "
+				+ "WHERE repository.id = "+repositoryId+" AND file.path LIKE '"+path+"%' "
+						+ "AND (file.path LIKE '%test%' OR file.path LIKE '%Test%') "
+				+ "GROUP BY revision.author "
+				+ "ORDER BY revision.author";
+		
+		List<Object[]> list = em.createQuery(query).getResultList();
+		
+		ArrayList<CommitHistory> lista = new ArrayList<>();
+		for(int i = 0; i<list.size(); i++){
+			CommitHistory history = new CommitHistory();
+			history.setName((String) list.get(i)[0]);
+			long[] vetor = new long[1];
+			history.setName((String) list.get(i)[0]);
+			vetor[0] = (long) list.get(i)[1];
+			history.setData(vetor);
+			lista.add(history);
+		}
+		
+		return lista;
+		
+	}
+	
+public LineChart getTestCommitsHistoryAuthor(long repositoryId, String author){
+		
+		//todos os commits
+		String query = "SELECT DAY(revision.date) as day, MONTHNAME(revision.date) as month "
+				+ "FROM Repository AS repository, "
+				+ "IN (repository.revisions) as revision "
+				+ "WHERE repository.id = "+repositoryId+" "
+				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
+				+ "ORDER BY revision.id";
+		//commits sem ser de testes
+		String query1 = "SELECT DAY(revision.date) as dia, MONTHNAME(revision.date) as mes, "
+				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
+				+ "FROM Repository AS repository, "
+				+ "IN(repository.revisions) as revision, "
+				+ "IN(revision.files) as file "
+				+ "WHERE repository.id = "+repositoryId+" AND revision.author LIKE '"+author+"' "
+						+ "AND NOT(file.path LIKE '%test%' OR file.path LIKE '%Test%') "
+				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
+				+ "ORDER BY revision.id";
+		//commits de testes
+		String query2 = "SELECT DAY(revision.date) as dia, MONTHNAME(revision.date) as mes, "
+				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
+				+ "FROM Repository AS repository, "
+				+ "IN(repository.revisions) as revision, "
+				+ "IN(revision.files) as file "
+				+ "WHERE repository.id = "+repositoryId+" AND revision.author LIKE '"+author+"' "
+						+ "AND (file.path LIKE '%test%' OR file.path LIKE '%Test%') "
+				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
+				+ "ORDER BY revision.id";
+		
+		LineChart chart = new LineChart();
+		
+		
+		List<Object[]> list = em.createQuery(query).getResultList();
+		String[] categories = new String[list.size()];
+		
+		for(int i = 0; i < list.size(); i++){
+			categories[i] =   list.get(i)[0] + " - " +  list.get(i)[1];
+			
+		}
+		List<Object[]> list1 = em.createQuery(query1).getResultList();
+		CommitHistory history = new CommitHistory();
+		history.setName("Commits Comuns");
+		
+		long[] vetor = new long[list.size()];
+		fodefora: for(int i = 0; i < list.size(); i++){
+			for(int j = 0;j < list1.size(); j++){
+				vetor[i] = 0l;
+			if(categories[i].equals(list1.get(j)[0] + " - " +  list1.get(j)[1])){
+				vetor[i] = (long) list1.get(j)[2];
+				continue fodefora;
+			}
+			}
+		}
+		
+		history.setData(vetor);
+		
+		List<Object[]> list2 = em.createQuery(query2).getResultList();
+		CommitHistory history2 = new CommitHistory();
+		history2.setName("Commits de Teste");
+		
+		long[] vetor2 = new long[list.size()];
+		
+		fora: for(int i = 0; i < list.size(); i++){
+			for(int j = 0;j < list2.size(); j++){
+				vetor2[i] = 0l;
+				if(categories[i].equals(list2.get(j)[0] + " - " +  list2.get(j)[1])){
+					vetor2[i] = (long) list2.get(j)[2];
+					continue fora;
+				}
+			}
+		}
+		
+		history2.setData(vetor2);
+		
+		List<CommitHistory> commits = new ArrayList<CommitHistory>();
+		commits.add(history);
+		commits.add(history2);
+		chart.setDataSeries(commits);
+		chart.setDataCategories(categories);
+		
+		
+		
+		return chart;
+		
+		
+	}
+
+	public List<String> getAuthores(long repositoryId){
+		String query = "SELECT revision.author as author "
+				+ "FROM Repository AS repository, "
+				+ "IN(repository.revisions) as revision "
+				+ "WHERE repository.id = "+repositoryId+" GROUP BY author";
+		
+		List<String> list = em.createQuery(query).getResultList();
+		return list;
+	}
+}
