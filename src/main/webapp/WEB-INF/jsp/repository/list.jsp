@@ -167,14 +167,20 @@
 					$('#path').removeAttr('readonly');
 					$('#path').val("/trunk");
 					$('#name').removeAttr('disabled');
-				} else {
+				} if($('#type option:selected').attr('id') == 'GITHUB') {
 					$('#local').val("false").attr('selected', 'selected');
 					$('#local').attr('disabled', 'disabled');
 					$('#path').val("/master");
 					$('#path').attr('readonly', 'readonly');
 					$('#name').val(" ");
 					$('#name').attr('disabled', 'disabled');
+				} if($('#type option:selected').attr('id') == 'GIT') {
+					$('#local').removeAttr('disabled');
+					$('#path').removeAttr('readonly');
+					$('#path').val("/master");
+					$('#name').removeAttr('disabled');
 				}
+				
 			}
 		});
 	</script>
