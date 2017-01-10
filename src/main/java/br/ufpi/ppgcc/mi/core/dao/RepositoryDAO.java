@@ -446,7 +446,7 @@ public LineChart getTestCommitsHistoryAuthor(long repositoryId, String author){
 		}
 		List<Object[]> list1 = em.createQuery(query1).getResultList();
 		CommitHistory history = new CommitHistory();
-		history.setName("Commits Comuns");
+		history.setName("Commits");
 		
 		long[] vetor = new long[list.size()];
 		fodefora: for(int i = 0; i < list.size(); i++){

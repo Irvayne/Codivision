@@ -14,50 +14,65 @@ import br.ufpi.ppgcc.mi.core.model.ExtractionPath;
 import br.ufpi.ppgcc.mi.core.model.OperationFile;
 import br.ufpi.ppgcc.mi.core.model.Repository;
 import br.ufpi.ppgcc.mi.core.model.Revision;
+import br.ufpi.ppgcc.mi.core.model.enums.NodeType;
 import br.ufpi.ppgcc.mi.core.repository.GitUtil;
 
 public class Test {
 
 	public static void main(String[] args) throws InvalidRemoteException, TransportException, IllegalStateException, GitAPIException, AmbiguousObjectException, IncorrectObjectTypeException, IOException {
 		Repository repository = new Repository();
+		
 		//para repositorios do git lab, deve ser adicionado o .git no final. PAra git hub nao eh necessario
-		repository.setUrl("https://gitlab.com/haykav/trainings2016.git");
+		repository.setUrl("http://gitlab.infoway-pi.com.br/ihealth-maa/MAA.git");
+		System.out.println("Iniciando a extracao do repositorio "+repository.getUrl());
 		ExtractionPath path = new ExtractionPath();
-		path.setPath("master");
+		path.setPath("/master");
 		repository.getExtractionPaths().add(path);
 		
-		DirTree dirTree = new DirTree();
-		repository.getExtractionPaths().get(0).setDirTree(dirTree);
-		
-		//GitUtil util = new GitUtil(repository.getUrl(),path.getPath(), "irvaynematheus@yahoo.com","ronaldo920021995");
+
+		//GitUtil util = new GitUtil(repository.getUrl(),path.getPath(), "irvayne","12345678");
 		//GitUtil util = new GitUtil(repository.getUrl(),path.getPath());
-		GitUtil util = new GitUtil(new File("C:\\Users\\Irvayne Matheus\\Desktop\\workspace\\Codivision\\trainings2016/.git"));
+		//GitUtil util = new GitUtil(new File("C:\\Users\\Irvayne Matheus\\Desktop\\workspace\\Codivision\\VendeDistraido/.git"));
+		GitUtil util = new GitUtil(new File("C:\\Users\\Irvayne Matheus\\Desktop\\Extração InfoWay 07012017\\ihealth-maa MAA\\master\\MAA/.git"));
+		
+		//repository.setUrl("http://gitlab.infoway-pi.com.br/ihealth-maa/MAA.git/branches-28837_notificacao_autorizacao_eletivas_SMS");
 		
 		repository.setRepositoryRoot(repository.getUrl());
 		repository.setRevisions(util.getRevisions());
 		repository.setLastUpdate(repository.getRevisions().get(0).getDate());
 		repository.setLastRevision(repository.getRevisions().get(0).getExternalId());
+		
+		DirTree tree = new DirTree();
+		tree.setText("master");
+		tree.setType(NodeType.FOLDER);
+		tree.setChildren(util.getDirTree());
+		
+		repository.getExtractionPaths().get(0).setDirTree(tree);
 		BinaryFile.writeObject(repository, "arquivo");
 		
-		for(Revision aux: repository.getRevisions()){
-			System.out.println(aux.getExternalId());
-			System.out.println(aux.getAuthor());
-			System.out.println(aux.getDate());
-			System.out.println("Total de arquivos = "+aux.getTotalFiles());
-			
-			System.out.println("Arquivos na revisao");
-			for(OperationFile file : aux.getFiles()){
-				System.out.println("Nome do arquivo = "+file.getPath());
-				System.out.println("Linhas add = "+file.getLineAdd());
-				System.out.println("Linhas mod = "+file.getLineMod());
-				System.out.println("Linhas rem = "+file.getLineDel());
-				System.out.println("Linhas cond = "+file.getLineCondition());
-				
-			}
-			
-			System.out.println();
-		}
-		System.out.println();
+//		for(Revision aux: repository.getRevisions()){
+//			System.out.println(aux.getExternalId());
+//			System.out.println(aux.getAuthor());
+//			System.out.println(aux.getDate());
+//			System.out.println("Total de arquivos = "+aux.getTotalFiles());
+//			
+//			System.out.println("Arquivos na revisao");
+//			for(OperationFile file : aux.getFiles()){
+//				System.out.println("Nome do arquivo = "+file.getPath());
+//				System.out.println("Linhas add = "+file.getLineAdd());
+//				System.out.println("Linhas mod = "+file.getLineMod());
+//				System.out.println("Linhas rem = "+file.getLineDel());
+//				System.out.println("Linhas cond = "+file.getLineCondition());
+//				
+//			}
+//			
+//			System.out.println();
+//		}
+//		System.out.println();
+//		
+		
+
+		System.out.println("Finalizado a extracao do repositorio "+repository.getUrl());
 	}
 
 }

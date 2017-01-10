@@ -34,6 +34,7 @@ import org.eclipse.jgit.util.io.DisabledOutputStream;
 import br.ufpi.ppgcc.mi.core.model.DirTree;
 import br.ufpi.ppgcc.mi.core.model.OperationFile;
 import br.ufpi.ppgcc.mi.core.model.Revision;
+import br.ufpi.ppgcc.mi.core.model.enums.NodeType;
 import br.ufpi.ppgcc.mi.core.model.enums.OperationType;
 
 public class GitUtil {
@@ -148,44 +149,59 @@ public class GitUtil {
 			return revisions;
 	}
 
-	private Set<DirTree> getDirTree() throws IOException{
+	public Set<DirTree> getDirTree() throws IOException{
 		Ref head = repo.getRef("HEAD");
-		
+
 		RevWalk walk = new RevWalk(repo);
 		RevCommit commit = walk.parseCommit(head.getObjectId()); 
         RevTree tree = commit.getTree(); 
-        System.out.println("Having tree: " + tree);
-				
-		 
-	     TreeWalk treeWalk = new TreeWalk(repo);
-	     treeWalk.addTree(tree); 
-        // treeWalk.setRecursive(true); 
-        	// treeWalk.setFilter(PathFilter.create(path));
-         
-         
-         Set<DirTree> dirTree = new HashSet<DirTree>();
+        TreeWalk treeWalk = new TreeWalk(repo);
+	    treeWalk.addTree(tree); 
+        treeWalk.setRecursive(true); 
+        
+        Set<DirTree> dirTree = new HashSet<DirTree>();
  		
- 		while(treeWalk.next()){
+        while(treeWalk.next()){
  			
- 			DirTree aux = new DirTree();
- 			aux.setText(treeWalk.getPathString());
- 			
- 		if(!treeWalk.isSubtree()){
- 			System.out.println(treeWalk.getPathString());
- 			dirTree.add(aux);
- 			continue;
- 		}else{
- 			System.out.println(treeWalk.getPathString());
- 			treeWalk.enterSubtree();
- 			
- 			}
- 		}	
-         
+        	if(treeWalk.isSubtree()){
+        		treeWalk.enterSubtree();
+        	}
+ 		
+        	String[] path = treeWalk.getPathString().split("/");
+        	findTree(dirTree,path,0);
+ 		}
+ 		 
         return dirTree;
 
 	}
 	
-
+	private void findTree(Set<DirTree> dirTree, String[] path, int i) {
+		for(DirTree tree:dirTree){
+			if(tree.getText().equals(path[i])){
+				findTree(tree.getChildren(),path,i+1);
+				return;
+			}
+		}
+		DirTree tree = new DirTree();
+		tree.setText(path[i]);
+		
+		if(path.length == (i+1))
+			tree.setType(NodeType.FILE);
+		else
+			tree.setType(NodeType.FOLDER);
+		
+		dirTree.add(tree);
+		
+		if(path.length > (i+1)){
+			for(DirTree tree1:dirTree){
+				if(tree1.getText().equals(path[i])){
+					findTree(tree1.getChildren(),path,i+1);
+					return;
+					}
+				}
+			
+		}
+	}
 	private  List<DiffEntry> diffsForTheCommit(Repository repo, RevCommit commit) throws IOException, AmbiguousObjectException, 
 	IncorrectObjectTypeException { 
 
