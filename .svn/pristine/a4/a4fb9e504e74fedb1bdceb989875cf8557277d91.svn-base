@@ -170,59 +170,93 @@ public class RepositoryDAO extends GenericDAO<Repository>{
 		
 	}
 	
+public List<AuthorPercentage> getPercentageTest(Long repositoryId, String path){
+		
+		/* Obtem a quantidade de alterações realizadas por outros desenvolvedores no arquivo 
+		 * Essas alterações são calculadas em nível de arquivo pois foi a única forma que encotrei de fazer
+		 * Essa é uma subconsulta baseada na consulta principal, então ela depende da data da consulta principal,
+		 * 		pois só são contabilizadas alterações posteriores a data informada */
+		String futureAlterations = "SELECT case when count(*) < 20 then count(*) else 20 end from "
+										+ "Repository as r, "
+										+ "IN(r.revisions) as rev, "
+										+ "IN(rev.files) as f "
+									+ "WHERE "
+										+ "f.path = file.path and "
+										+ "r.id = :repositoryId and "
+										+ "rev.author != revision.author and "
+										+ "rev.date > revision.date";
+		
+		/* Cria um objeto do tipo AuthorPercentage
+		 * Recebe como parâmetros um desenvolvedor e a quantidade de alterações realizadas por ele
+		 * A quantidade de alterações é calculada da seguinte forma:
+		 * 		- São somados os valores de ADD MOD e DEL para arquivo dentro do caminho selecionado
+		 * 				- Esses valores são multiplicados pelos seus respectivos pesos
+		 * 		- O valor resultante é penalizado de acordo com a data em que foi feita essa alteração 
+		 * 				- 10% por mês decorrido 
+		 * 		- O valor resultante é penalizado de acordo com a quantidade de alterações realizadas 
+		 * 				por outros desenvolvedores (5% por cada alteração realizada por outro desenvolvedor). 
+		 * 		- Todo esse calculo é feito para cada arquivo e depois agregado por todos os arquivos 
+		 * 				por meio da função SUM e agrupado por cada desenvolvedor */
+		String newAuthorPercentace = "new br.ufpi.ppgcc.mi.core.model.vo.AuthorPercentage("
+										+ "revision.author, "
+								   		+ "sum( "
+								   			+ "((file.lineAdd * configuration.addWeight) + (file.lineMod * configuration.modWeight) + (file.lineDel * configuration.delWeight)) * "
+								   			+ "(1.0 - ( datediff(current_date(),cast(revision.date as date)) * configuration.monthlyDegradationPercentage)) * "
+								   			+ "(1.0 - ((" + futureAlterations + ") * (configuration.changeDegradation/100) )) "
+					   					+ "), "
+					   					+ "sum(file.lineAdd + file.lineMod + file.lineDel + 0)"
+				   					+ ")";
+		
+		/* A query principal */
+		String query = "SELECT " + newAuthorPercentace + " from "
+							+ "Repository as repository "
+							+ "inner join repository.configuration as configuration, "
+							+ "IN(repository.revisions) as revision, "
+							+ "IN(revision.files) as file "
+					+ "WHERE "
+						+ "file.path LIKE :path and (file.path LIKE '%Test%' OR file.path LIKE '%test%') and "
+						+ "repository.id = :repositoryId and "
+						+ "revision.date >= configuration.initDate and "
+						+ "revision.date <= configuration.endDate "
+					+ "GROUP BY "
+						+ "revision.author "
+					+ "ORDER BY "
+						+ "revision.author ASC";
+		
+		return em.createQuery(query, AuthorPercentage.class)
+				.setParameter("repositoryId", repositoryId)
+				.setParameter("path", path+"%")
+				.getResultList();
+		
+	}
+	
 	public LineChart getTestCommitsHistory(long repositoryId){
 		
-		Repository repository = findById(repositoryId);
-		String testPathNot = "";
-		String testPath = "AND file.path LIKE '' ";
-		if(repository.getTestFiles().size()!=0){
-			testPath = "AND (";
-			testPathNot = "AND NOT(";
-		}
-		for(int i = 0; i < repository.getTestFiles().size(); i++){
-			testPathNot = testPathNot + "file.path LIKE '"+repository.getTestFiles().get(i).getPath()+"%'";
-			testPath = testPath + "file.path LIKE '"+repository.getTestFiles().get(i).getPath()+"%'";
-			if(i < repository.getTestFiles().size()-1){
-				testPathNot = testPathNot + " OR ";
-				testPath = testPath + " OR ";
-			}
-		}
-		if(repository.getTestFiles().size()!=0){
-			testPathNot = testPathNot + ") ";
-			testPath = testPath + ") ";
-		}
 		//todos os commits
 		String query = "SELECT DAY(revision.date) as day, MONTHNAME(revision.date) as month "
-				+ "FROM Repository AS repository "
-				+ "inner join repository.configuration as configuration, "
+				+ "FROM Repository AS repository, "
 				+ "IN (repository.revisions) as revision "
 				+ "WHERE repository.id = "+repositoryId+" "
-				+ "and revision.date >= configuration.initDate and "
-						+ "revision.date <= configuration.endDate "
 				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
 				+ "ORDER BY revision.date";
 		//commits sem ser de testes
 		String query1 = "SELECT DAY(revision.date) as dia, MONTHNAME(revision.date) as mes, "
 				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
-				+ "FROM Repository AS repository "
-				+ "inner join repository.configuration as configuration, "
+				+ "FROM Repository AS repository, "
 				+ "IN(repository.revisions) as revision, "
 				+ "IN(revision.files) as file "
-				+ "WHERE repository.id = "+repositoryId+" "+testPathNot
-				+ "and revision.date >= configuration.initDate and "
-				+ "revision.date <= configuration.endDate "
+				+ "WHERE repository.id = "+repositoryId+" "
+						+ "AND NOT(file.path LIKE '%test%' OR file.path LIKE '%Test%') "
 				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
 				+ "ORDER BY revision.date";
 		//commits de testes
 		String query2 = "SELECT DAY(revision.date) as dia, MONTHNAME(revision.date) as mes, "
 				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
-				+ "FROM Repository AS repository "
-				+ "inner join repository.configuration as configuration, "
+				+ "FROM Repository AS repository, "
 				+ "IN(repository.revisions) as revision, "
 				+ "IN(revision.files) as file "
-				+ "WHERE repository.id = "+repositoryId+" "+testPath
-				+ "and revision.date >= configuration.initDate and "
-				+ "revision.date <= configuration.endDate "
+				+ "WHERE repository.id = "+repositoryId+" "
+						+ "AND (file.path LIKE '%test%' OR file.path LIKE '%Test%') "
 				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
 				+ "ORDER BY revision.date";
 		
@@ -286,35 +320,13 @@ public class RepositoryDAO extends GenericDAO<Repository>{
 	
 	public List<CommitHistory> getContribuitionAuthorTest(long repositoryId){
 		
-		Repository repository = findById(repositoryId);
-		String testPathNot = "";
-		String testPath = "AND file.path LIKE '' ";
-		if(repository.getTestFiles().size()!=0){
-			testPath = "AND (";
-			testPathNot = "AND NOT(";
-		}
-		for(int i = 0; i < repository.getTestFiles().size(); i++){
-			testPathNot = testPathNot + "file.path LIKE '"+repository.getTestFiles().get(i).getPath()+"%'";
-			testPath = testPath + "file.path LIKE '"+repository.getTestFiles().get(i).getPath()+"%'";
-			if(i < repository.getTestFiles().size()-1){
-				testPathNot = testPathNot + " OR ";
-				testPath = testPath + " OR ";
-			}
-		}
-		if(repository.getTestFiles().size()!=0){
-			testPathNot = testPathNot + ") ";
-			testPath = testPath + ") ";
-		}
-		
 				String query = "SELECT revision.author as author, "
 						+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
-						+ "FROM Repository AS repository "
-						+ "inner join repository.configuration as configuration, "
+						+ "FROM Repository AS repository, "
 						+ "IN(repository.revisions) as revision, "
 						+ "IN(revision.files) as file "
-						+ "WHERE repository.id = "+repositoryId+" "+testPath
-						+ "and revision.date >= configuration.initDate and "
-						+ "revision.date <= configuration.endDate "
+						+ "WHERE repository.id = "+repositoryId+" "
+								+ "AND (file.path LIKE '%test%' OR file.path LIKE '%Test%') "
 						+ "GROUP BY revision.author "
 						+ "ORDER BY revision.author";
 				
@@ -336,36 +348,13 @@ public class RepositoryDAO extends GenericDAO<Repository>{
 	}
 	
 	public List<CommitHistory> getContribuitionQntLine(long repositoryId, String path){
-	
-		Repository repository = findById(repositoryId);
-		String testPathNot = "";
-		String testPath = "AND file.path LIKE '' ";
-		if(repository.getTestFiles().size()!=0){
-			testPath = "AND (";
-			testPathNot = "AND NOT(";
-		}
-		for(int i = 0; i < repository.getTestFiles().size(); i++){
-			testPathNot = testPathNot + "file.path LIKE '"+repository.getTestFiles().get(i).getPath()+"%'";
-			testPath = testPath + "file.path LIKE '"+repository.getTestFiles().get(i).getPath()+"%'";
-			if(i < repository.getTestFiles().size()-1){
-				testPathNot = testPathNot + " OR ";
-				testPath = testPath + " OR ";
-			}
-		}
-		if(repository.getTestFiles().size()!=0){
-			testPathNot = testPathNot + ") ";
-			testPath = testPath + ") ";
-		}
-		
 		String query = "SELECT revision.author as author, "
 				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
-				+ "FROM Repository AS repository "
-				+ "inner join repository.configuration as configuration, "
+				+ "FROM Repository AS repository, "
 				+ "IN(repository.revisions) as revision, "
 				+ "IN(revision.files) as file "
-				+ "WHERE repository.id = "+repositoryId+" AND file.path LIKE '"+path+"%' "+testPathNot
-				+ "and revision.date >= configuration.initDate and "
-				+ "revision.date <= configuration.endDate "
+				+ "WHERE repository.id = "+repositoryId+" AND file.path LIKE '"+path+"%' "
+						+ "AND NOT(file.path LIKE '%test%' OR file.path LIKE '%Test%') "
 				+ "GROUP BY revision.author "
 				+ "ORDER BY revision.author";
 		
@@ -388,35 +377,13 @@ public class RepositoryDAO extends GenericDAO<Repository>{
 	}
 	
 	public List<CommitHistory> getContribuitionQntLineTest(long repositoryId, String path){
-		
-		Repository repository = findById(repositoryId);
-		String testPathNot = "";
-		String testPath = "AND file.path LIKE '' ";
-		if(repository.getTestFiles().size()!=0){
-			testPath = "AND (";
-			testPathNot = "AND NOT(";
-		}
-		for(int i = 0; i < repository.getTestFiles().size(); i++){
-			testPathNot = testPathNot + "file.path LIKE '"+repository.getTestFiles().get(i).getPath()+"%'";
-			testPath = testPath + "file.path LIKE '"+repository.getTestFiles().get(i).getPath()+"%'";
-			if(i < repository.getTestFiles().size()-1){
-				testPathNot = testPathNot + " OR ";
-				testPath = testPath + " OR ";
-			}
-		}
-		if(repository.getTestFiles().size()!=0){
-			testPathNot = testPathNot + ") ";
-			testPath = testPath + ") ";
-		}
 		String query = "SELECT revision.author as author, "
 				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
-				+ "FROM Repository AS repository "
-				+ "inner join repository.configuration as configuration, "
+				+ "FROM Repository AS repository, "
 				+ "IN(repository.revisions) as revision, "
 				+ "IN(revision.files) as file "
-				+ "WHERE repository.id = "+repositoryId+" AND file.path LIKE '"+path+"%' "+testPath
-				+ "and revision.date >= configuration.initDate and "
-				+ "revision.date <= configuration.endDate "
+				+ "WHERE repository.id = "+repositoryId+" AND file.path LIKE '"+path+"%' "
+						+ "AND (file.path LIKE '%test%' OR file.path LIKE '%Test%') "
 				+ "GROUP BY revision.author "
 				+ "ORDER BY revision.author";
 		
@@ -438,59 +405,32 @@ public class RepositoryDAO extends GenericDAO<Repository>{
 	}
 	
 public LineChart getTestCommitsHistoryAuthor(long repositoryId, String author){
-	
-	Repository repository = findById(repositoryId);
-	String testPathNot = "";
-	String testPath = "AND file.path LIKE '' ";
-	if(repository.getTestFiles().size()!=0){
-		testPath = "AND (";
-		testPathNot = "AND NOT(";
-	}
-	for(int i = 0; i < repository.getTestFiles().size(); i++){
-		testPathNot = testPathNot + "file.path LIKE '"+repository.getTestFiles().get(i).getPath()+"%'";
-		testPath = testPath + "file.path LIKE '"+repository.getTestFiles().get(i).getPath()+"%'";
-		if(i < repository.getTestFiles().size()-1){
-			testPathNot = testPathNot + " OR ";
-			testPath = testPath + " OR ";
-		}
-	}
-	if(repository.getTestFiles().size()!=0){
-		testPathNot = testPathNot + ") ";
-		testPath = testPath + ") ";
-	}
 		
 		//todos os commits
 		String query = "SELECT DAY(revision.date) as day, MONTHNAME(revision.date) as month "
-				+ "FROM Repository AS repository "
-				+ "inner join repository.configuration as configuration, "
+				+ "FROM Repository AS repository, "
 				+ "IN (repository.revisions) as revision "
 				+ "WHERE repository.id = "+repositoryId+" "
-				+ "and revision.date >= configuration.initDate and "
-				+ "revision.date <= configuration.endDate "
 				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
 				+ "ORDER BY revision.date";
 		//commits sem ser de testes
 		String query1 = "SELECT DAY(revision.date) as dia, MONTHNAME(revision.date) as mes, "
 				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
-				+ "FROM Repository AS repository "
-				+ "inner join repository.configuration as configuration, "
+				+ "FROM Repository AS repository, "
 				+ "IN(repository.revisions) as revision, "
 				+ "IN(revision.files) as file "
-				+ "WHERE repository.id = "+repositoryId+" AND revision.author LIKE '"+author+"' "+testPathNot
-				+ "and revision.date >= configuration.initDate and "
-				+ "revision.date <= configuration.endDate "
+				+ "WHERE repository.id = "+repositoryId+" AND revision.author LIKE '"+author+"' "
+						+ "AND NOT(file.path LIKE '%test%' OR file.path LIKE '%Test%') "
 				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
 				+ "ORDER BY revision.date";
 		//commits de testes
 		String query2 = "SELECT DAY(revision.date) as dia, MONTHNAME(revision.date) as mes, "
 				+ "SUM(file.lineAdd + file.lineMod + file.lineDel + file.lineCondition) as soma "
-				+ "FROM Repository AS repository "
-				+ "inner join repository.configuration as configuration, "
+				+ "FROM Repository AS repository, "
 				+ "IN(repository.revisions) as revision, "
 				+ "IN(revision.files) as file "
-				+ "WHERE repository.id = "+repositoryId+" AND revision.author LIKE '"+author+"' "+testPath
-				+ "and revision.date >= configuration.initDate and "
-				+ "revision.date <= configuration.endDate "
+				+ "WHERE repository.id = "+repositoryId+" AND revision.author LIKE '"+author+"' "
+						+ "AND (file.path LIKE '%test%' OR file.path LIKE '%Test%') "
 				+ "GROUP BY MONTH(revision.date) , DAY(revision.date) "
 				+ "ORDER BY revision.date";
 		
@@ -554,12 +494,9 @@ public LineChart getTestCommitsHistoryAuthor(long repositoryId, String author){
 
 	public List<String> getAuthors(long repositoryId){
 		String query = "SELECT revision.author as author "
-				+ "FROM Repository AS repository "
-				+ "inner join repository.configuration as configuration, "
+				+ "FROM Repository AS repository, "
 				+ "IN(repository.revisions) as revision "
-				+ "WHERE revision.date >= configuration.initDate AND "
-				+ "revision.date <= configuration.endDate "
-				+ "AND repository.id = "+repositoryId+" GROUP BY author";
+				+ "WHERE repository.id = "+repositoryId+" GROUP BY author";
 		
 		List<String> list = em.createQuery(query).getResultList();
 		return list;

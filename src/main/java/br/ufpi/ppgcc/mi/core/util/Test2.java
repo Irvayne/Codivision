@@ -17,13 +17,13 @@ import br.ufpi.ppgcc.mi.core.model.Revision;
 import br.ufpi.ppgcc.mi.core.model.enums.NodeType;
 import br.ufpi.ppgcc.mi.core.repository.GitUtil;
 
-public class Test {
+public class Test2 {
 
 	public static void main(String[] args) throws InvalidRemoteException, TransportException, IllegalStateException, GitAPIException, AmbiguousObjectException, IncorrectObjectTypeException, IOException {
 		Repository repository = new Repository();
 		
 		//para repositorios do git lab, deve ser adicionado o .git no final. PAra git hub nao eh necessario
-		repository.setUrl("https://bitbucket.org/Thasciano/capriovi2.0");
+		repository.setUrl("http://gitlab.infoway-pi.com.br/ihealth-maa/MAA.git");
 		System.out.println("Iniciando a extracao do repositorio "+repository.getUrl());
 		ExtractionPath path = new ExtractionPath();
 		path.setPath("/master");
@@ -31,8 +31,8 @@ public class Test {
 		
 
 		//GitUtil util = new GitUtil(repository.getUrl(),path.getPath(), "otaviocury.oc@gmail.com","arthurcury10");
-		GitUtil util = new GitUtil(repository.getUrl(),path.getPath(), "otaviocury","arthurcury10");
-		
+		//GitUtil util = new GitUtil(repository.getUrl());
+		GitUtil util = new GitUtil(new File("C:\\Users\\Irvayne Matheus\\Desktop\\Computação\\Iniciação Científica\\Iniciação2016-2017\\Extração InfoWay 07012017\\ihealth-maa MAA\\master\\MAA/.git"));
 		//GitUtil util = new GitUtil(repository.getUrl());
 		//GitUtil util = new GitUtil(new File("C:\\Users\\Irvayne Matheus\\Desktop\\workspace\\Codivision\\VendeDistraido/.git"));
 		//GitUtil util = new GitUtil(new File("C:\\Users\\Irvayne Matheus\\Desktop\\Computação\\Iniciação Científica\\Iniciação2016-2017\\Extração InfoWay 07012017\\ihealth-maa MAA\\branches\\28174_modelo_folha_pagamento_uniplam\\MAA/.git"));
@@ -41,6 +41,7 @@ public class Test {
 		
 		repository.setRepositoryRoot(repository.getUrl());
 		repository.setRevisions(util.getRevisions());
+		repository.getTestFiles().addAll(util.getTestFiles());
 		repository.setLastUpdate(repository.getRevisions().get(0).getDate());
 		repository.setLastRevision(repository.getRevisions().get(0).getExternalId());
 		
